@@ -166,7 +166,7 @@ START_DATE = {
   'Italy': '2/15/20',
   'Republic of Korea': '1/22/20',
   'Iran (Islamic Republic of)': '2/19/20',
-  'Spain': '3/7/20',
+  'Spain': '3/1/20',
   'France':'3/15/20'
 }
 
@@ -182,7 +182,7 @@ POPULATION = {
 N = POPULATION[country]
 # Initial number of infected and recovered individuals, I0 and R0.
 
-incubation_days = 14
+incubation_days = 1
 incub = int( np.argwhere( confirmed_df.keys() == START_DATE[country] ) ) - incubation_days
 I_0 = confirmed_df[ix].iloc[0].loc[START_DATE[country]]
 R_0 = recoveries_df[ix].iloc[0].loc[START_DATE[country]]
@@ -197,10 +197,12 @@ S_0 = N - I_0 - R_0
 #I_0 = I_0/N
 #R_0 = R_0/N
 class Learner(object):
-    def __init__(self, country, loss, confirmed=None):
+    def __init__(self, country, loss, confirmed=None, plot= False, verbose=False ):
         self.country = country
         self.loss = loss
         self.confirmed = confirmed
+        self.plot = plot
+        self.verbose = verbose
 
     def load_confirmed(self, country):
       """
@@ -210,9 +212,16 @@ class Learner(object):
       country_df = df[df['Country/Region'] == country]
       return country_df.iloc[0].loc[START_DATE[country]:]
   
-    def load_confirmed_pablo(self, country, confirmed_df):
+    def load_confirmed_pablo(self, country, confirmed_df, incubation=True):
         ix = confirmed_df['Country/Region'] == country
-        return confirmed_df[ix].iloc[0].loc[START_DATE[country]:]
+        conf = confirmed_df[ix].iloc[0].loc[START_DATE[country]:]
+        if incubation:
+            incub = int( np.argwhere( confirmed_df.keys() == START_DATE[country] ) ) - incubation_days
+            conf1 = conf.copy()
+            for i in np.arange(len(conf)):
+                conf1.iloc[i] = conf.iloc[i] - confirmed_df[ix].iloc[0].iloc[incub+i] 
+            conf = conf1
+        return conf
 
     def extend_index(self, index, new_size):
         values = index.values
@@ -268,12 +277,13 @@ class Learner(object):
         optimal = minimize(
             self.loss,
 #            [0.001, 0.001],
-            [0.04*1/S_0, R_0/I_0],
+            [1/S_0, R_0/I_0],
             args=(data),
-            method='L-BFGS-B',
+            method='Powell',
+#            method='L-BFGS-B',
  #           bounds=[(0.00000001, 0.4), (0.00000001, 0.4)],
-            bounds=[(1e-3, 4), (0, 3)],
-#            options={'maxiter':1000000,'disp':True}
+            bounds=[(1e-3, 10), (0.1, 10)],
+            options={'maxiter':1000000,'disp':True,'ftol':1e-6}
         )
         beta, gamma = optimal.x
         new_index, extended_actual, prediction = self.predict_pablo(beta, gamma, data)
@@ -283,13 +293,14 @@ class Learner(object):
             'I': prediction[:,1],
             'R': prediction[:,2]
         }, index=new_index)
-        fig, ax = plt.subplots(figsize=(15, 10))
-        ax.set_title(self.country)
 #        df = df*N
 #        df[['I','Actual']].plot(ax=ax)
-        plt.plot(df[['I','Actual']])
-        plt.xticks(rotation=90)
-        plt.legend(['Infected (predicted)','Infected (actual)'])
+        if self.plot:
+            fig, ax = plt.subplots(figsize=(15, 10))
+            ax.set_title(self.country)
+            plt.plot(df[['I','Actual']])
+            plt.xticks(rotation=90)
+            plt.legend(['Infected (predicted)','Infected (actual)'])
 #        plt.grid()
         self.df = df
         self.beta = beta
@@ -301,7 +312,6 @@ def loss(point, data):
     """
     size = len(data)
     beta, gamma = point
-    print(point)
     def SIR(t, y):
         S = y[0]
         I = y[1]
@@ -328,7 +338,6 @@ def loss_pablo(point, data):
     """
     size = len(data)
     beta, gamma = point
-    print(point)
     def dSIR(t, y):
         S = y[0]
         I = y[1]
@@ -336,15 +345,37 @@ def loss_pablo(point, data):
         return [S-beta*S*I/N, I+beta*S*I/N - gamma*I, R+gamma*I]
     sol = dsolve_ivp(dSIR, t_eval=[0, size], y0=[S_0,I_0,R_0])
     rmsd = np.sqrt(np.mean((sol[:,1] - data)**2))
-    print(rmsd)
     return rmsd
 
    
 
 
 #%%
-learn = Learner(country, loss_pablo, confirmed_df)
+learn = Learner(country, loss_pablo, confirmed_df, plot=True)
 learn.train()
+
+
+#%%
+""" A test about model evolution """
+
+st = START_DATE[country]
+vals = []
+win = 20
+for i in np.arange(win):
+    j = -win+i
+    learn = Learner(country, loss_pablo, confirmed_df.iloc[:,:j])
+    learn.train()
+    vals.append( (confirmed_df.columns[j], learn.beta, learn.gamma) )
+
+#%%
+    
+vals_df = pd.DataFrame(vals, columns=['Date','beta', 'gamma'])
+plt.plot(vals_df['Date'], vals_df[['beta','gamma']], marker='o')
+
+plt.plot(vals_df['Date'], vals_df['beta']/vals_df['gamma'], marker='o')
+plt.legend(['Average contacts', 'Recovered rate', 'Reproduction'])
+plt.xticks(rotation=90)
+#plt.yscale("log")
 
 
 
