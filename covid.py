@@ -182,7 +182,7 @@ POPULATION = {
 N = POPULATION[country]
 # Initial number of infected and recovered individuals, I0 and R0.
 
-incubation_days = 1
+incubation_days = 14
 incub = int( np.argwhere( confirmed_df.keys() == START_DATE[country] ) ) - incubation_days
 I_0 = confirmed_df[ix].iloc[0].loc[START_DATE[country]]
 R_0 = recoveries_df[ix].iloc[0].loc[START_DATE[country]]
@@ -204,15 +204,7 @@ class Learner(object):
         self.plot = plot
         self.verbose = verbose
 
-    def load_confirmed(self, country):
-      """
-      Load confirmed cases downloaded from HDX
-      """
-      df = pd.read_csv('data/time_series_19-covid-Confirmed.csv')
-      country_df = df[df['Country/Region'] == country]
-      return country_df.iloc[0].loc[START_DATE[country]:]
-  
-    def load_confirmed_pablo(self, country, confirmed_df, incubation=True):
+    def load_confirmed(self, country, confirmed_df, incubation=True):
         ix = confirmed_df['Country/Region'] == country
         conf = confirmed_df[ix].iloc[0].loc[START_DATE[country]:]
         if incubation:
@@ -231,6 +223,7 @@ class Learner(object):
             values = np.append(values, datetime.strftime(current, '%m/%d/%y'))
         return values
 
+
     def predict(self, beta, gamma, data):
         """
         Predict how the number of people in each compartment can be changed through time toward the future.
@@ -238,41 +231,23 @@ class Learner(object):
         """
         predict_range = 60
         new_index = self.extend_index(data.index, predict_range)
-        size = len(new_index)
-        def SIR(t, y):
-            S = y[0]
-            I = y[1]
-            R = y[2]
-            return [-beta*S*I, beta*S*I-gamma*I, gamma*I]
-        extended_actual = np.concatenate((data.values, [None] * (size - len(data.values))))
-        return new_index, extended_actual, solve_ivp(SIR, [0, size], [S_0,I_0,R_0], t_eval=np.arange(0, size, 1))
-
-    def predict_pablo(self, beta, gamma, data):
-        """
-        Predict how the number of people in each compartment can be changed through time toward the future.
-        The model is formulated with the given beta and gamma.
-        """
-        predict_range = 60
-        new_index = self.extend_index(data.index, predict_range)
+        T = 60*60*24
         size = len(new_index)
         def dSIR(t, y):
             S = y[0]
             I = y[1]
             R = y[2]
-            return [S-beta*S*I/N, I+beta*S*I/N - gamma*I, R+gamma*I]
+            return [S-T*beta*S*I/N, I+T*beta*S*I/N - T*gamma*I, R+T*gamma*I]
         extended_actual = np.concatenate((data.values, [None] * (size - len(data.values))))
         return new_index, extended_actual, dsolve_ivp(dSIR, t_eval=[0, size], y0=[S_0,I_0,R_0])
 
 
 
-    def train(self,pablo=True):
+    def train(self):
         """
         Run the optimization to estimate the beta and gamma fitting the given confirmed cases.
         """
-        if pablo:      
-            data = self.load_confirmed_pablo(self.country, self.confirmed)
-        else:
-            data = self.load_confirmed(self.country) 
+        data = self.load_confirmed(self.country, self.confirmed)
         self.data = data
         optimal = minimize(
             self.loss,
@@ -282,11 +257,11 @@ class Learner(object):
             method='Powell',
 #            method='L-BFGS-B',
  #           bounds=[(0.00000001, 0.4), (0.00000001, 0.4)],
-            bounds=[(1e-3, 10), (0.1, 10)],
-            options={'maxiter':1000000,'disp':True,'ftol':1e-6}
+            bounds=[(1e-3, 10), (1e-3, 10)],
+            options={'maxiter':1000000,'disp':True,'ftol':1e-3}
         )
         beta, gamma = optimal.x
-        new_index, extended_actual, prediction = self.predict_pablo(beta, gamma, data)
+        new_index, extended_actual, prediction = self.predict(beta, gamma, data)
         df = pd.DataFrame({
             'Actual': extended_actual,
             'S': prediction[:,0],
@@ -306,19 +281,6 @@ class Learner(object):
         self.beta = beta
         self.gamma = gamma
 
-def loss(point, data):
-    """
-    RMSE between actual confirmed cases and the estimated infectious people with given beta and gamma.
-    """
-    size = len(data)
-    beta, gamma = point
-    def SIR(t, y):
-        S = y[0]
-        I = y[1]
-        R = y[2]
-        return [-beta*S*I, beta*S*I-gamma*I, gamma*I]
-    solution = solve_ivp(SIR, [0, size], [S_0,I_0,R_0], t_eval=np.arange(0, size, 1), vectorized=True)
-    return np.sqrt(np.mean((solution.y[1] - data)**2))
 
 def dsolve_ivp(fun, t_eval, y0):
         y = y0
@@ -331,17 +293,19 @@ def dsolve_ivp(fun, t_eval, y0):
 
 
 
-def loss_pablo(point, data):
+def loss(point, data):
     """
     RMSE between actual confirmed cases and the estimated infectious people with given beta and gamma.
     Using a discrete model
     """
     size = len(data)
     beta, gamma = point
+    T = 24*60*60
     def dSIR(t, y):
         S = y[0]
         I = y[1]
         R = y[2]
+        return [S-T*beta*S*I/N, I+T*beta*S*I/N - T*gamma*I, R+T*gamma*I]
         return [S-beta*S*I/N, I+beta*S*I/N - gamma*I, R+gamma*I]
     sol = dsolve_ivp(dSIR, t_eval=[0, size], y0=[S_0,I_0,R_0])
     rmsd = np.sqrt(np.mean((sol[:,1] - data)**2))
@@ -351,7 +315,7 @@ def loss_pablo(point, data):
 
 
 #%%
-learn = Learner(country, loss_pablo, confirmed_df, plot=True)
+learn = Learner(country, loss, confirmed_df, plot=True)
 learn.train()
 
 
@@ -363,17 +327,19 @@ vals = []
 win = 20
 for i in np.arange(win):
     j = -win+i
-    learn = Learner(country, loss_pablo, confirmed_df.iloc[:,:j])
+    learn = Learner(country, loss, confirmed_df.iloc[:,:j])
     learn.train()
     vals.append( (confirmed_df.columns[j], learn.beta, learn.gamma) )
 
 #%%
     
 vals_df = pd.DataFrame(vals, columns=['Date','beta', 'gamma'])
-plt.plot(vals_df['Date'], vals_df[['beta','gamma']], marker='o')
+#plt.plot(vals_df['Date'], vals_df[['beta','gamma']], marker='o')
 
 plt.plot(vals_df['Date'], vals_df['beta']/vals_df['gamma'], marker='o')
-plt.legend(['Average contacts', 'Recovered rate', 'Reproduction'])
+#plt.legend(['Average contacts', 'Recovered rate', 'Reproduction'])
+plt.legend(['Reproduction ratio'])
+
 plt.xticks(rotation=90)
 #plt.yscale("log")
 
