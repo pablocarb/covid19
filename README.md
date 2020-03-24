@@ -5,9 +5,11 @@ Some updates and projections based on current data and models about the COVID-19
 Evolution and prediction of the COVID-19 in [Spain](https://github.com/pablocarb/covid19/blob/master/covid-19-predictions.ipynb).
 
 <ul>
+<li>{{ site.baseurl }}</li>
   {% for post in site.posts %}
+  <li>{{ post.url }}</li>
     <li>
-      <a href="{{ post.url }}">{{ post.title }}</a>
+      <a href="{{ site.baseurl | append: post.url }}">{{ post.title }}</a>
     </li>
   {% endfor %}
 </ul>
