@@ -6,8 +6,8 @@ Evolution and prediction of the COVID-19 in [Spain](https://github.com/pablocarb
 
 <ul>
 <li>{{ site.baseurl }}</li>
-<li>{{ post.url }}</li>
   {% for post in site.posts %}
+  <li>{{ post.url }}</li>
     <li>
       <a href="{{{ post.url }}">{{ post.title }}</a>
     </li>
