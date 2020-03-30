@@ -58,7 +58,10 @@ START_DATE = {
   'Iran (Islamic Republic of)': '2/10/20',
   'Spain': '2/15/20',
   'France':'3/1/20',
-  'India': '3/1/20',
+  'India': '3/1/20',  
+  'United Kingdom': '1/22/20',
+  'US': '1/22/20'
+
 }
 
 def align(df,country):
@@ -72,7 +75,9 @@ POPULATION = {
     'Spain' : 45*1000000.0,
     'France': 67*1e6,
     'Korea, South': 52*1e6,
-    'India': 1.35e3*1e6
+    'India': 1.35e3*1e6,
+    'United Kingdom': 66.44*1e6,
+    'US': 327.2*1e6
    }
    
 
@@ -95,7 +100,7 @@ def load_data(country, incubation=True, incubation_days=14):
             d = i + start - incubation_days
             if d >= 4:
                 ix = align(confirmed_df,country)
-                confirmed[i] = confirmed[i] - confirmed_df.loc[ix].iloc[0,d]
+                confirmed[i] = confirmed[i] - recoveries[i] - deaths[i] - confirmed_df.loc[ix].iloc[0,d] 
                 confirmed_delta[i] = confirmed_df.loc[ix].iloc[0,d]
                 ix = align(deaths_df,country)
                 deaths[i] = deaths[i] - deaths_df.loc[ix].iloc[0,d]
@@ -117,14 +122,14 @@ S_0 = N - I_0 - R_0
 #R_0 = R_0/N
 
 class Learner(object):
-    def __init__(self, country, population, confirmed, recoveries, loss, plot= False, verbose=False ):
+    def __init__(self, country, population, confirmed, recoveries, deaths, loss, plot= False, verbose=False ):
         self.country = country
         self.loss = loss
         self.confirmed = confirmed
         self.recoveries = recoveries
         self.population = population
         I_0 = confirmed[0]
-        R_0 = recoveries[0]
+        R_0 = recoveries[0] + deaths[0]
         S_0 = population - I_0 - R_0
         self.y0 = [S_0, I_0, R_0]
         self.plot = plot
@@ -189,9 +194,9 @@ class Learner(object):
             self.graph()
 #        plt.grid()
 
-    def graph(self, delta=None, save=None):
+    def graph(self, delta=None, save=False):
             fig, ax = plt.subplots(figsize=(15, 10))
-            ax.set_title("%" % (self.country))
+            ax.set_title("%s" % (self.country))
 #            ax.set_title("%s beta=%.2f gamma =%.2f R0 = %.3f" % (self.country, self.beta, self.gamma, self.beta/self.gamma))
             if delta is not None:
                 self.df['Total'] = self.df['Actual']
@@ -259,35 +264,35 @@ def loss(point,args):
 
 #%%
     
-def calculate_model(country,start_date, plot=False, verbose=False):
+def calculate_model(country,start_date, plot=False, verbose=False, incubation_days=14):
     START_DATE[country] = start_date
     N = POPULATION[country]
-    confirmed, deaths, recoveries, confirmed_delta = load_data(country, incubation=True, incubation_days=14)
+    confirmed, deaths, recoveries, confirmed_delta = load_data(country, incubation=True, incubation_days=incubation_days)
     I_0 = confirmed[0]
     R_0 = recoveries[0]
     S_0 = N - I_0 - R_0
-    learn = Learner(country, N, confirmed, recoveries, loss, plot=plot, verbose=verbose)
+    learn = Learner(country, N, confirmed, recoveries, deaths, loss, plot=plot, verbose=verbose)
     learn.train()
     learn.delta = confirmed_delta
     return learn    
 
 #%%
-
-country = 'Spain'
+incubation_days = 14
+country = 'France'
 START_DATE[country] = '1/22/20'
-confirmed, deaths, recoveries, confirmed_delta = load_data(country, incubation=True, incubation_days=14)
+confirmed, deaths, recoveries, confirmed_delta = load_data(country, incubation=True, incubation_days=incubation_days)
 
 costs = []
 dates = []
 for i in confirmed.index[:-30]:
-    learn = calculate_model(country, i)
+    learn = calculate_model(country, i, incubation_days=incubation_days)
     print(i,learn.cost)
     dates.append(i)
     costs.append( learn.cost )
 #%%
 
 best =  dates[np.argmin(costs)]
-learn = calculate_model(country, best, plot=False)
+learn = calculate_model(country, best, plot=False, incubation_days=incubation_days)
 learn.graph(learn.delta, save=True)
 
 #%%
