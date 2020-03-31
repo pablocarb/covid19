@@ -278,7 +278,7 @@ def calculate_model(country,start_date, plot=False, verbose=False, incubation_da
 
 #%%
 incubation_days = 14
-country = 'France'
+country = 'United Kingdom'
 START_DATE[country] = '1/22/20'
 confirmed, deaths, recoveries, confirmed_delta = load_data(country, incubation=True, incubation_days=incubation_days)
 
